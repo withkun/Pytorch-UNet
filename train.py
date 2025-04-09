@@ -37,12 +37,15 @@ def train_model(
         weight_decay: float = 1e-8,
         momentum: float = 0.999,
         gradient_clipping: float = 1.0,
+        images_dir: str = '',
+        masks_dir: str = '',
+        output_dir: str = '',
 ):
     # 1. Create dataset
     try:
-        dataset = CarvanaDataset(dir_img, dir_mask, img_scale)
+        dataset = CarvanaDataset(images_dir, masks_dir, img_scale)
     except (AssertionError, RuntimeError, IndexError):
-        dataset = BasicDataset(dir_img, dir_mask, img_scale)
+        dataset = BasicDataset(images_dir, masks_dir, img_scale)
 
     # 2. Split into train / validation partitions
     n_val = int(len(dataset) * val_percent)
@@ -77,7 +80,7 @@ def train_model(
     optimizer = optim.RMSprop(model.parameters(),
                               lr=learning_rate, weight_decay=weight_decay, momentum=momentum, foreach=True)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'max', patience=5)  # goal: maximize Dice score
-    grad_scaler = torch.cuda.amp.GradScaler(enabled=amp)
+    grad_scaler = torch.amp.GradScaler('cuda', enabled=amp)
     criterion = nn.CrossEntropyLoss() if model.n_classes > 1 else nn.BCEWithLogitsLoss()
     global_step = 0
 
@@ -160,14 +163,24 @@ def train_model(
                             pass
 
         if save_checkpoint:
-            Path(dir_checkpoint).mkdir(parents=True, exist_ok=True)
+            Path(output_dir).mkdir(parents=True, exist_ok=True)
             state_dict = model.state_dict()
             state_dict['mask_values'] = dataset.mask_values
-            torch.save(state_dict, str(dir_checkpoint / 'checkpoint_epoch{}.pth'.format(epoch)))
+            torch.save(state_dict, str(output_dir / 'checkpoint_epoch{}.pth'.format(epoch)))
             logging.info(f'Checkpoint {epoch} saved!')
 
 
 def get_args():
+    def str2bool(value):
+      if isinstance(value, bool):
+          return value
+      if value.lower() in ("yes", "true", "t", "y", "1"):
+          return True
+      elif value.lower() in ("no", "false", "f", "n", "0"):
+          return False
+      else:
+          raise argparse.ArgumentTypeError("Boolean value expected")
+
     parser = argparse.ArgumentParser(description='Train the UNet on images and target masks')
     parser.add_argument('--epochs', '-e', metavar='E', type=int, default=5, help='Number of epochs')
     parser.add_argument('--batch-size', '-b', dest='batch_size', metavar='B', type=int, default=1, help='Batch size')
@@ -177,15 +190,21 @@ def get_args():
     parser.add_argument('--scale', '-s', type=float, default=0.5, help='Downscaling factor of the images')
     parser.add_argument('--validation', '-v', dest='val', type=float, default=10.0,
                         help='Percent of the data that is used as validation (0-100)')
-    parser.add_argument('--amp', action='store_true', default=False, help='Use mixed precision')
-    parser.add_argument('--bilinear', action='store_true', default=False, help='Use bilinear upsampling')
-    parser.add_argument('--classes', '-c', type=int, default=2, help='Number of classes')
+    parser.add_argument('--amp', type=str2bool, default=False, help='Use mixed precision')
+    parser.add_argument('--bilinear', type=str2bool, default=False, help='Use bilinear upsampling')
+    parser.add_argument('--classes', '-c', type=int, default=4, help='Number of classes')
+    parser.add_argument('--channels', type=int, default=3, help='Train image channels')
+
+    parser.add_argument('--dir-img', type=str, default=dir_img, help='Train image path')
+    parser.add_argument('--dir-mask', type=str, default=dir_mask, help='Train mask path')
+    parser.add_argument('--dir-output', type=str, default=dir_checkpoint, help='Train output path')
 
     return parser.parse_args()
 
 
 if __name__ == '__main__':
     args = get_args()
+    print(f"args: {vars(args)}\n")
 
     logging.basicConfig(level=logging.INFO, format='%(levelname)s: %(message)s')
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -194,7 +213,7 @@ if __name__ == '__main__':
     # Change here to adapt to your data
     # n_channels=3 for RGB images
     # n_classes is the number of probabilities you want to get per pixel
-    model = UNet(n_channels=3, n_classes=args.classes, bilinear=args.bilinear)
+    model = UNet(n_channels=args.channels, n_classes=args.classes, bilinear=args.bilinear)
     model = model.to(memory_format=torch.channels_last)
 
     logging.info(f'Network:\n'
@@ -218,7 +237,10 @@ if __name__ == '__main__':
             device=device,
             img_scale=args.scale,
             val_percent=args.val / 100,
-            amp=args.amp
+            amp=args.amp,
+            images_dir=args.dir_img,
+            masks_dir=args.dir_mask,
+            output_dir=args.dir_output,
         )
     except torch.cuda.OutOfMemoryError:
         logging.error('Detected OutOfMemoryError! '
@@ -234,5 +256,8 @@ if __name__ == '__main__':
             device=device,
             img_scale=args.scale,
             val_percent=args.val / 100,
-            amp=args.amp
+            amp=args.amp,
+            images_dir=args.dir_img,
+            masks_dir=args.dir_mask,
+            output_dir=args.dir_output,
         )
