@@ -193,7 +193,7 @@ def get_args():
     parser.add_argument('--amp', type=str2bool, default=False, help='Use mixed precision')
     parser.add_argument('--bilinear', type=str2bool, default=False, help='Use bilinear upsampling')
     parser.add_argument('--classes', '-c', type=int, default=4, help='Number of classes')
-    parser.add_argument('--channels', type=int, default=3, help='Train image channels')
+    parser.add_argument('--channels', type=int, default=3, help='Number of image channels')
 
     parser.add_argument('--dir-img', type=str, default=dir_img, help='Train image path')
     parser.add_argument('--dir-mask', type=str, default=dir_mask, help='Train mask path')
